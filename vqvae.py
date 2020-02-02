@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -48,7 +50,7 @@ class Quantize(nn.Module):
         embed_ind = embed_ind.view(*z.shape[:-1])  # B x C x H x W tensor with the indices of their nearest code
         quantize = self.embed_code(embed_ind)  # B x C x H x W x D quantized tensor
 
-        # Exponential decay updating
+        # Exponential decay updating, as a replacement to codebook loss
         if self.training:
             self.cluster_size.data.mul_(self.decay).add_(
                 1 - self.decay, embed_onehot.sum(0)
@@ -62,7 +64,9 @@ class Quantize(nn.Module):
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
             self.embed.data.copy_(embed_normalized)
 
+        # Commitment loss, used to keep the encoder output close to the codebook
         diff = (quantize.detach() - z).pow(2).mean()
+
         quantize = z + (quantize - z).detach()  # This is added to pass the gradients directly from Z. Basically
         # means that quantization operations have no gradient
 
@@ -82,6 +86,10 @@ class ResBlock(nn.Module):
         Residual block with two Convolutional layers
     """
     def __init__(self, in_channel, channel):
+        """
+        :param in_channel: input channels
+        :param channel: intermediate channels of residual block
+        """
         super().__init__()
 
         self.conv = nn.Sequential(
@@ -99,8 +107,19 @@ class ResBlock(nn.Module):
 
 
 class Encoder(nn.Module):
+    """
+    Encoder network. It is based on a set of convolutional layers followed by N residual blocks.
+    """
     def __init__(self, in_channel, channel, n_res_block, n_res_channel, stride):
+        """
+        :param in_channel: input channels
+        :param channel: output channels
+        :param n_res_block: number of residual blocks
+        :param n_res_channel: number of intermediate layers of the residual block
+        :param stride: stride to reduce the input image dimensions (it can be 2 or 4)
+        """
         super().__init__()
+        assert stride == 2 or stride == 4
 
         if stride == 4:
             blocks = [
@@ -111,7 +130,7 @@ class Encoder(nn.Module):
                 nn.Conv2d(channel, channel, 3, padding=1),
             ]
 
-        elif stride == 2:
+        else:  # stride = 2
             blocks = [
                 nn.Conv2d(in_channel, channel // 2, 4, stride=2, padding=1),
                 nn.ReLU(inplace=True),
@@ -125,15 +144,27 @@ class Encoder(nn.Module):
 
         self.blocks = nn.Sequential(*blocks)
 
-    def forward(self, input):
-        return self.blocks(input)
+    def forward(self, x):
+        return self.blocks(x)
 
 
 class Decoder(nn.Module):
+    """
+        Decoder network. It consists on a convolutional layer, N residual blocks and a set of deconvolutions.
+    """
     def __init__(
         self, in_channel, out_channel, channel, n_res_block, n_res_channel, stride
     ):
+        """
+                :param in_channel: input channels
+                :param channel: output channels
+                :param n_res_block: number of residual blocks
+                :param n_res_channel: number of intermediate layers of the residual block
+                :param stride: stride to reduce the input image dimensions (it can be 2 or 4)
+        """
         super().__init__()
+
+        assert stride == 2 or stride == 4
 
         blocks = [nn.Conv2d(in_channel, channel, 3, padding=1)]
 
@@ -153,18 +184,22 @@ class Decoder(nn.Module):
                 ]
             )
 
-        elif stride == 2:
+        else:
             blocks.append(
                 nn.ConvTranspose2d(channel, out_channel, 4, stride=2, padding=1)
             )
 
         self.blocks = nn.Sequential(*blocks)
 
-    def forward(self, input):
-        return self.blocks(input)
+    def forward(self, z):
+        return self.blocks(z)
 
 
 class VQVAE(nn.Module):
+    """
+     Vector Quantized Variational Autoencoder. This networks includes a encoder which maps an
+     input image to a discrete latent space, and a decoder to maps the latent map back to the input domain
+    """
     def __init__(
         self,
         in_channel=3,
@@ -175,20 +210,29 @@ class VQVAE(nn.Module):
         n_embed=512,
         decay=0.99,
     ):
+        """
+        :param in_channel: input channels
+        :param channel: output channels of the encoder
+        :param n_res_block: number of residual blocks for the decoder and the encoder
+        :param n_res_channel: number of intermediate channels of the residual block
+        :param embed_dim: embedding dimensions
+        :param n_embed: number of embeddings in the codebook
+        :param decay: weight decay for exponential updating
+        """
         super().__init__()
 
-        self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=4)
-        self.enc_t = Encoder(channel, channel, n_res_block, n_res_channel, stride=2)
-        self.quantize_conv_t = nn.Conv2d(channel, embed_dim, 1)
-        self.quantize_t = Quantize(embed_dim, n_embed)
+        self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=4)  # Bottom encoder
+        self.enc_t = Encoder(channel, channel, n_res_block, n_res_channel, stride=2)  # Top encoder
+        self.quantize_conv_t = nn.Conv2d(channel, embed_dim, 1)  # Dimension reduction to embedding size
+        self.quantize_t = Quantize(embed_dim, n_embed, decay)  # Top vector quantization
         self.dec_t = Decoder(
             embed_dim, embed_dim, channel, n_res_block, n_res_channel, stride=2
-        )
-        self.quantize_conv_b = nn.Conv2d(embed_dim + channel, embed_dim, 1)
-        self.quantize_b = Quantize(embed_dim, n_embed)
+        )  # Top decoder
+        self.quantize_conv_b = nn.Conv2d(embed_dim + channel, embed_dim, 1)  # Bottom vector quantization dimension red
+        self.quantize_b = Quantize(embed_dim, n_embed)  # Bottom vector quantization
         self.upsample_t = nn.ConvTranspose2d(
             embed_dim, embed_dim, 4, stride=2, padding=1
-        )
+        )  # Top upsampling to bottom channels
         self.dec = Decoder(
             embed_dim + embed_dim,
             in_channel,
@@ -198,39 +242,61 @@ class VQVAE(nn.Module):
             stride=4,
         )
 
-    def forward(self, input):
-        quant_t, quant_b, diff, _, _ = self.encode(input)
+    def forward(self, x):
+        quant_t, quant_b, diff, _, _ = self.encode(x)
         dec = self.decode(quant_t, quant_b)
 
         return dec, diff
 
-    def encode(self, input):
-        enc_b = self.enc_b(input)
-        enc_t = self.enc_t(enc_b)
+    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Encodes and quantizes an input tensor using VQ-VAE2 algorithm
+        :param x: input tensor
+        :return: A tuple containing: quantized top map, quantized bottom map, commitment loss of top and bottom
+                 maps, codebook indices used for top map and codebook indices for bottom map.
+        """
+        enc_b = self.enc_b(x)  # Encoding bottom
+        enc_t = self.enc_t(enc_b)  # Encoding top from bottom encoding
 
+        # Quantization of top layer and converting to B x H x W x C
         quant_t = self.quantize_conv_t(enc_t).permute(0, 2, 3, 1)
         quant_t, diff_t, id_t = self.quantize_t(quant_t)
+
+        # converting back the quantized map to BxCxHxW
         quant_t = quant_t.permute(0, 3, 1, 2)
-        diff_t = diff_t.unsqueeze(0)
+        diff_t = diff_t.unsqueeze(0)  # Commitment loss of top layer
 
-        dec_t = self.dec_t(quant_t)
-        enc_b = torch.cat([dec_t, enc_b], 1)
+        dec_t = self.dec_t(quant_t)  # Decoding top quantized map "one level" to concatenate it with bottom encoding
+        enc_b = torch.cat([dec_t, enc_b], 1)  # Concatenation of Ebottom(x) and decoded top quantized map
 
+        # Quantization of bottom encoding and decoded top map
         quant_b = self.quantize_conv_b(enc_b).permute(0, 2, 3, 1)
         quant_b, diff_b, id_b = self.quantize_b(quant_b)
         quant_b = quant_b.permute(0, 3, 1, 2)
-        diff_b = diff_b.unsqueeze(0)
+        diff_b = diff_b.unsqueeze(0)  # commitment loss of bottom layer
 
         return quant_t, quant_b, diff_t + diff_b, id_t, id_b
 
-    def decode(self, quant_t, quant_b):
-        upsample_t = self.upsample_t(quant_t)
-        quant = torch.cat([upsample_t, quant_b], 1)
-        dec = self.dec(quant)
+    def decode(self, quant_t: torch.Tensor, quant_b: torch.Tensor) -> torch.Tensor:
+        """
+        Decodes top and bottom latent mappings
+        :param quant_t: quantized top codes
+        :param quant_b: quantized bottom codes
+        :return: decoded tensor in input space
+        """
+        upsample_t = self.upsample_t(quant_t)  # Upsamples top quantization
+        quant = torch.cat([upsample_t, quant_b], 1)  # Concatenates bottom and upsampled top latent maps
+        dec = self.dec(quant)  # Decodes to input space
 
         return dec
 
-    def decode_code(self, code_t, code_b):
+    def decode_code(self, code_t: torch.Tensor, code_b: torch.Tensor) -> torch.Tensor:
+        """
+        Decodes top and bottom latent mappings given the code indices
+        :param code_t: top layer map indices
+        :param code_b: bottom layer map indices
+        :return: decoded tensor in input space
+        """
         quant_t = self.quantize_t.embed_code(code_t)
         quant_t = quant_t.permute(0, 3, 1, 2)
         quant_b = self.quantize_b.embed_code(code_b)
