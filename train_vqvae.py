@@ -8,6 +8,7 @@ from torchvision import datasets, transforms
 
 from tqdm import tqdm
 
+from scheduler import CycleScheduler
 from test_vqvae import test, recon_sample
 from vqvae import VQVAE
 
@@ -70,6 +71,7 @@ def main():
     parser.add_argument('--epoch', type=int, default=100)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--bs', type=int, default=64)
+    parser.add_argument('--sched', type=str, default='cycle')
     parser.add_argument('path', help="root path with train and test folder in it", type=str)
 
     args = parser.parse_args()
@@ -99,12 +101,12 @@ def main():
     model = VQVAE().to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, [50, 70], 0.1)
-    # TODO: Implement cycle scheduler
-    # if args.sched == 'cycle':
-    #     scheduler = CycleScheduler(
-    #         optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
-    #     )
+    if args.sched == 'cycle':
+        scheduler = CycleScheduler(
+            optimizer, args.lr, n_iter=len(train_loader) * args.epoch, momentum=None
+        )
+    else:
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, [50, 70], 0.1)
 
     train_losses = []
     test_losses = []
