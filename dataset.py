@@ -34,6 +34,7 @@ class LMDBDataset(Dataset):
             lock=False,
             readahead=False,
             meminit=False,
+            subdir=True
         )
 
         if not self.env:
