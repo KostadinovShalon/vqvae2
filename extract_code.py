@@ -65,3 +65,8 @@ def main():
     env = lmdb.open(args.name, map_size=map_size)
 
     extract(env, loader, model, device)
+
+
+if __name__ == '__main__':
+    main()
+
