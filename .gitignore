@@ -4,3 +4,6 @@ checkpoints/
 weights/
 old/
 venv/
+env/
+*.slurm
+*.out

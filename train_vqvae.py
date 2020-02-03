@@ -72,6 +72,8 @@ def main():
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--bs', type=int, default=64)
     parser.add_argument('--sched', type=str, default='cycle')
+    parser.add_argument('--vishost', type=str, default='localhost')
+    parser.add_argument('--visport', type=int, default=8097)
     parser.add_argument('path', help="root path with train and test folder in it", type=str)
 
     args = parser.parse_args()
@@ -111,6 +113,7 @@ def main():
     train_losses = []
     test_losses = []
     vis = visdom.Visdom()
+    vis = visdom.Visdom(server=args.vishost, port=args.visport)
     win = None
     best_model_loss = np.inf
     for i in range(args.epoch):
