@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import numpy as np
 import torch
@@ -90,7 +91,8 @@ if __name__ == '__main__':
 
     device = 'cuda'
 
-    dataset = LMDBDataset(args.path)
+    train_path = os.path.join(args.path, 'train')
+    dataset = LMDBDataset(train_path)
     loader = DataLoader(
         dataset, batch_size=args.batch, shuffle=True, num_workers=4, drop_last=True
     )
