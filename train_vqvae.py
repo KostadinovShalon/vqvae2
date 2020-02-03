@@ -132,7 +132,7 @@ def main():
 
         if test_loss < best_model_loss:
             print("Saving model")
-            torch.save(model.state_dict, f'weights/vqvae.pt')
+            torch.save(model.state_dict(), f'weights/vqvae.pt')
             best_model_loss = test_loss
 
         train_losses.append(train_loss)
