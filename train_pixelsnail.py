@@ -91,8 +91,7 @@ if __name__ == '__main__':
 
     device = 'cuda'
 
-    train_path = os.path.join(args.path, 'train')
-    dataset = LMDBDataset(train_path)
+    dataset = LMDBDataset(args.path)
     loader = DataLoader(
         dataset, batch_size=args.batch, shuffle=True, num_workers=4, drop_last=True
     )
