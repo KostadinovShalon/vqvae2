@@ -81,8 +81,9 @@ class PixelTransform:
         return torch.from_numpy(ar).long()
 
 
-def plot(loss, acc, vis, win=None):
+def plot(loss, acc, title, vis, win=None):
     f = plt.figure(figsize=(16, 8))
+    f.suptitle(title)
     ax = f.add_subplot(1, 2, 1)
     ax.plot(loss)
     ax.set_title('Loss.')
@@ -193,7 +194,7 @@ if __name__ == '__main__':
         l, a = train(args, i, loader, model, optimizer, scheduler, device)
         losses.append(l)
         accs.append(a)
-        win = plot(losses, accs, vis, win)
+        win = plot(losses, accs, args.hier, vis, win)
         torch.save(
             {'model': model.module.state_dict(), 'args': args},
             f'checkpoints/pixelsnail_{args.hier}_{str(i + 1).zfill(3)}.pt',
