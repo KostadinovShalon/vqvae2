@@ -124,6 +124,8 @@ if __name__ == '__main__':
     parser.add_argument('path', type=str)
 
     args = parser.parse_args()
+    vishost = args.vishost
+    visport = args.visport
 
     print(args)
 
@@ -186,7 +188,7 @@ if __name__ == '__main__':
             optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
         )
 
-    vis = visdom.Visdom(server=args.vishost, port=args.visport)
+    vis = visdom.Visdom(server=vishost, port=visport)
     win = None
     losses = []
     accs = []
