@@ -1,3 +1,5 @@
+import visdom
+from matplotlib import pyplot as plt
 import argparse
 import os
 
@@ -23,7 +25,14 @@ def train(args, epoch, loader, model, optimizer, scheduler, device):
 
     criterion = nn.CrossEntropyLoss()
 
+    total_loss = 0.0
+    acc = 0.0
+    n = 0
+    total_correct = 0
+    total_images = 0
+
     for i, (top, bottom, label) in enumerate(loader):
+        n += 1
         model.zero_grad()
 
         top = top.to(device)
@@ -38,6 +47,7 @@ def train(args, epoch, loader, model, optimizer, scheduler, device):
             out, _ = model(bottom, condition=top)
 
         loss = criterion(out, target)
+        total_loss += loss.item()
         loss.backward()
 
         if scheduler is not None:
@@ -47,6 +57,8 @@ def train(args, epoch, loader, model, optimizer, scheduler, device):
         _, pred = out.max(1)
         correct = (pred == target).float()
         accuracy = correct.sum() / target.numel()
+        total_correct += correct.sum()
+        total_images += target.numel()
 
         lr = optimizer.param_groups[0]['lr']
 
@@ -56,16 +68,39 @@ def train(args, epoch, loader, model, optimizer, scheduler, device):
                 f'acc: {accuracy:.5f}; lr: {lr:.5f}'
             )
         )
+    return total_loss / n, total_correct / total_images
 
 
 class PixelTransform:
     def __init__(self):
         pass
 
-    def __call__(self, input):
-        ar = np.array(input)
+    def __call__(self, x):
+        ar = np.array(x)
 
         return torch.from_numpy(ar).long()
+
+
+def plot(loss, acc, vis, win=None):
+    f = plt.figure(figsize=(16, 8))
+    ax = f.add_subplot(1, 2, 1)
+    ax.plot(loss)
+    ax.set_title('Loss.')
+    ax.set_xlabel('Epoch')
+
+    ax = f.add_subplot(1, 2, 2)
+    ax.plot(acc)
+    ax.set_title('Accuracy')
+    ax.set_xlabel('Epoch')
+
+    if win is None:
+        win = vis.matplot(f)
+    else:
+        vis.matplot(f, win=win)
+
+    plt.close(f)
+
+    return win
 
 
 if __name__ == '__main__':
@@ -83,6 +118,8 @@ if __name__ == '__main__':
     parser.add_argument('--amp', type=str, default='O0')
     parser.add_argument('--sched', type=str)
     parser.add_argument('--ckpt', type=str)
+    parser.add_argument('--vishost', type=str, default='localhost')
+    parser.add_argument('--visport', type=int, default=48048)
     parser.add_argument('path', type=str)
 
     args = parser.parse_args()
@@ -148,8 +185,15 @@ if __name__ == '__main__':
             optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
         )
 
+    vis = visdom.Visdom(server=args.vishost, port=args.visport)
+    win = None
+    losses = []
+    accs = []
     for i in range(args.epoch):
-        train(args, i, loader, model, optimizer, scheduler, device)
+        l, a = train(args, i, loader, model, optimizer, scheduler, device)
+        losses.append(l)
+        accs.append(a)
+        win = plot(losses, accs, vis, win)
         torch.save(
             {'model': model.module.state_dict(), 'args': args},
             f'checkpoints/pixelsnail_{args.hier}_{str(i + 1).zfill(3)}.pt',

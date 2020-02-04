@@ -112,7 +112,6 @@ def main():
 
     train_losses = []
     test_losses = []
-    vis = visdom.Visdom()
     vis = visdom.Visdom(server=args.vishost, port=args.visport)
     win = None
     best_model_loss = np.inf
