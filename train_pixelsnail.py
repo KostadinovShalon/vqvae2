@@ -116,6 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_out_res_block', type=int, default=0)
     parser.add_argument('--n_cond_res_block', type=int, default=3)
     parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--ckpt_interval', type=int, default=10)
     parser.add_argument('--amp', type=str, default='O0')
     parser.add_argument('--sched', type=str)
     parser.add_argument('--ckpt', type=str)
@@ -126,6 +127,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     vishost = args.vishost
     visport = args.visport
+    ckpt_interval = args.ckpt_interval
 
     print(args)
 
@@ -197,7 +199,13 @@ if __name__ == '__main__':
         losses.append(l)
         accs.append(a)
         win = plot(losses, accs, args.hier, vis, win)
-        torch.save(
-            {'model': model.module.state_dict(), 'args': args},
-            f'checkpoints/pixelsnail_{args.hier}_{str(i + 1).zfill(3)}.pt',
-        )
+        if len(accs) <= 1 or accs[-1] > accs[-2]:
+            torch.save(
+                {'model': model.module.state_dict(), 'args': args},
+                f'weights/pixelsnail_{args.hier}.pt',
+            )
+        if i % ckpt_interval == 0:
+            torch.save(
+                {'model': model.module.state_dict(), 'args': args},
+                f'checkpoints/pixelsnail_{args.hier}_{str(i + 1).zfill(3)}.pt',
+            )
